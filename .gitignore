@@ -14,3 +14,9 @@ target
 **/mutants.out*/
 
 .vscode/
+.vendor/
+.testdata/
+.claude/
+
+# Mac
+.DS_Store
