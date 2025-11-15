@@ -17,6 +17,7 @@ target
 .vendor/
 .testdata/
 .claude/
+.reference/
 
 # Mac
 .DS_Store
