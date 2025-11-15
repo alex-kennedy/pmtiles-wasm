@@ -1,5 +1,7 @@
 mod compression;
+mod directory;
 mod error;
+mod header;
 mod tile_id;
 
 pub use compression::*;
