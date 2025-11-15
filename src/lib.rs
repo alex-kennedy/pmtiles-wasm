@@ -1,6 +1,8 @@
+mod compression;
 mod error;
 mod tile_id;
 
+pub use compression::*;
 pub use error::*;
 pub use tile_id::*;
 
