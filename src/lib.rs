@@ -1,11 +1,17 @@
+mod cache;
 mod compression;
 mod directory;
 mod error;
+mod fetch_source;
 mod header;
+mod reader;
+mod source;
 mod tile_id;
 
 pub use compression::*;
 pub use error::*;
+pub use reader::PMTilesReader;
+pub use source::*;
 pub use tile_id::*;
 
 pub fn set_panic_hook() {

@@ -1,3 +1,4 @@
+use std::rc::Rc;
 use std::string::FromUtf8Error;
 
 use thiserror::Error;
@@ -8,7 +9,7 @@ use crate::compression::Compression;
 /// Result for PMTilesError. Returned by most functions, including to JS.
 pub type PMTilesResult<T> = Result<T, PMTilesError>;
 
-#[derive(Error, Debug)]
+#[derive(Error, Debug, Clone)]
 pub enum PMTilesError {
     /// Failed to decode a PMTiles directory.
     #[error("Error decoding directory: {0}")]
@@ -18,7 +19,7 @@ pub enum PMTilesError {
     HeaderDecodeError(String),
     /// Error from the reqwest library.
     #[error("Error from reqwest: {0}")]
-    ReqwestError(#[from] reqwest::Error),
+    ReqwestError(Rc<reqwest::Error>),
     /// PMTiles archive changes between successive requests, potentially making the header invalid.
     #[error("PMTiles file changed between (potentially cached) requests")]
     ContentChangedError,
@@ -32,7 +33,7 @@ pub enum PMTilesError {
     UnsupportedCompression(Compression),
     /// Wrapped std::io::Error.
     #[error("IO error: {0}")]
-    IOError(#[from] std::io::Error),
+    IOError(Rc<std::io::Error>),
     /// Wrapped utf-8 error.
     #[error("utf-8 error: {0}")]
     FromUtf8Error(#[from] FromUtf8Error),
@@ -48,7 +49,26 @@ pub enum PMTilesError {
     /// Failed to decode zstd-compressed data.
     #[cfg(feature = "zstd")]
     #[error("zstd decode error: {0}")]
-    ZstdDecodeError(#[from] ruzstd::decoding::errors::FrameDecoderError),
+    ZstdDecodeError(Rc<ruzstd::decoding::errors::FrameDecoderError>),
+}
+
+impl From<reqwest::Error> for PMTilesError {
+    fn from(value: reqwest::Error) -> Self {
+        PMTilesError::ReqwestError(Rc::new(value))
+    }
+}
+
+impl From<std::io::Error> for PMTilesError {
+    fn from(value: std::io::Error) -> Self {
+        PMTilesError::IOError(Rc::new(value))
+    }
+}
+
+#[cfg(feature = "zstd")]
+impl From<ruzstd::decoding::errors::FrameDecoderError> for PMTilesError {
+    fn from(value: ruzstd::decoding::errors::FrameDecoderError) -> Self {
+        PMTilesError::ZstdDecodeError(Rc::new(value))
+    }
 }
 
 impl From<PMTilesError> for JsValue {
