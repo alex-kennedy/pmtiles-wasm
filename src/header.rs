@@ -255,11 +255,13 @@ fn decode_lat_or_lng(bytes: &[u8; 4]) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use wasm_bindgen_test::wasm_bindgen_test;
 
     use approx::assert_relative_eq;
     use rstest::rstest;
 
     #[rstest]
+    #[test_attr(wasm_bindgen_test(unsupported = test))]
     #[case([0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00], 0.0, 0.0)]
     #[case([128, 240, 250, 2, 128, 195, 201, 1], 3.0, 5.0)]
     #[case([9, 50, 20, 210, 141, 222, 209, 248], -12.0463731, -77.0428407)]
@@ -271,5 +273,97 @@ mod tests {
 
         assert_relative_eq!(lat_lng.lat, lat);
         assert_relative_eq!(lat_lng.lng, lng);
+    }
+
+    #[wasm_bindgen_test(unsupported = test)]
+    fn test_decode_header() {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(b"PMTiles");
+        bytes.push(3);
+        for value in 1u64..=11 {
+            bytes.extend_from_slice(&value.to_le_bytes());
+        }
+        bytes.extend_from_slice(&[1, 1, 2, 3, 12, 13]);
+        for value in [14i32, 15, 16, 17] {
+            bytes.extend_from_slice(&value.to_le_bytes());
+        }
+        bytes.push(14);
+        for value in [18i32, 19] {
+            bytes.extend_from_slice(&value.to_le_bytes());
+        }
+
+        let header = Header::decode(bytes.as_slice().try_into().unwrap()).unwrap();
+
+        assert_eq!(header.root_directory_offset, 1);
+        assert_eq!(header.root_directory_length, 2);
+        assert_eq!(header.metadata_offset, 3);
+        assert_eq!(header.metadata_length, 4);
+        assert_eq!(header.leaf_directories_offset, 5);
+        assert_eq!(header.leaf_directories_length, 6);
+        assert_eq!(header.tile_data_offset, 7);
+        assert_eq!(header.tile_data_length, 8);
+        assert_eq!(header.number_of_addressed_tiles, 9);
+        assert_eq!(header.number_of_tile_entries, 10);
+        assert_eq!(header.number_of_tile_contents, 11);
+        assert_eq!(header.clustered, Clustered::Clustered);
+        assert_eq!(header.internal_compression, Compression::None);
+        assert_eq!(header.tile_compression, Compression::Gzip);
+        assert_eq!(header.tile_type, TileType::Jpeg);
+        assert_eq!(header.min_zoom, 12);
+        assert_eq!(header.max_zoom, 13);
+        assert_relative_eq!(header.min_position.lng, 0.0000014);
+        assert_relative_eq!(header.min_position.lat, 0.0000015);
+        assert_relative_eq!(header.max_position.lng, 0.0000016);
+        assert_relative_eq!(header.max_position.lat, 0.0000017);
+        assert_eq!(header.center_zoom, 14);
+        assert_relative_eq!(header.center_position.lng, 0.0000018);
+        assert_relative_eq!(header.center_position.lat, 0.0000019);
+    }
+
+    #[wasm_bindgen_test(unsupported = test)]
+    fn test_decode_fixture_header() {
+        let bytes = include_bytes!("../testdata/test_fixture_1.pmtiles");
+
+        let header = Header::decode(bytes[0..127].try_into().unwrap()).unwrap();
+
+        assert_eq!(header.root_directory_offset, 127);
+        assert_eq!(header.root_directory_length, 25);
+        assert_eq!(header.metadata_offset, 152);
+        assert_eq!(header.metadata_length, 247);
+        assert_eq!(header.leaf_directories_offset, 0);
+        assert_eq!(header.leaf_directories_length, 0);
+        assert_eq!(header.tile_data_offset, 399);
+        assert_eq!(header.tile_data_length, 69);
+        assert_eq!(header.number_of_addressed_tiles, 1);
+        assert_eq!(header.number_of_tile_entries, 1);
+        assert_eq!(header.number_of_tile_contents, 1);
+        assert_eq!(header.clustered, Clustered::NotClustered);
+        assert_eq!(header.internal_compression, Compression::Gzip);
+        assert_eq!(header.tile_compression, Compression::Gzip);
+        assert_eq!(header.tile_type, TileType::Mvt);
+        assert_eq!(header.min_zoom, 0);
+        assert_eq!(header.max_zoom, 0);
+        assert_relative_eq!(header.min_position.lng, 0.0);
+        assert_relative_eq!(header.min_position.lat, 0.0);
+        assert_relative_eq!(header.max_position.lng, 0.9999999);
+        assert_relative_eq!(header.max_position.lat, 1.0);
+    }
+
+    #[wasm_bindgen_test(unsupported = test)]
+    fn test_decode_invalid_magic_number() {
+        let bytes = include_bytes!("../testdata/invalid.pmtiles");
+
+        let result = Header::decode(bytes[0..127].try_into().unwrap());
+
+        assert!(matches!(result, Err(PMTilesError::HeaderDecodeError(_))));
+    }
+
+    #[wasm_bindgen_test(unsupported = test)]
+    fn test_decode_future_spec_version() {
+        let bytes = include_bytes!("../testdata/invalid_v4.pmtiles");
+
+        let result = Header::decode(bytes[0..127].try_into().unwrap());
+
+        assert!(matches!(result, Err(PMTilesError::HeaderDecodeError(_))));
     }
 }

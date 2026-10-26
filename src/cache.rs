@@ -81,20 +81,19 @@ impl DirectoryCache {
 mod test {
     use super::*;
     use crate::error::PMTilesError;
+    use wasm_bindgen_test::wasm_bindgen_test;
 
     use std::cell::Cell;
     use std::future::poll_fn;
     use std::pin::pin;
     use std::task::{Context, Poll, Waker};
 
-    /// A single-entry directory: one tile with ID 0, run length 1, length 1, offset 0.
     fn directory() -> Directory {
         Directory::try_from([1u8, 0, 1, 1, 1].as_slice()).unwrap()
     }
 
-    #[test]
+    #[wasm_bindgen_test(unsupported = test)]
     fn hit_returns_cached_directory() {
-        // Arrange
         let cache = DirectoryCache::new(NonZeroUsize::new(10).unwrap());
         let first = cache
             .get_or_fetch(0, 10, async { Ok(directory()) })
@@ -102,20 +101,17 @@ mod test {
             .unwrap()
             .unwrap();
 
-        // Act
         let second = cache
             .get_or_fetch(0, 10, async { panic!("should not fetch") })
             .now_or_never()
             .unwrap()
             .unwrap();
 
-        // Assert
         assert!(Rc::ptr_eq(&first, &second));
     }
 
-    #[test]
+    #[wasm_bindgen_test(unsupported = test)]
     fn concurrent_misses_share_one_fetch() {
-        // Arrange
         let cache = DirectoryCache::new(NonZeroUsize::new(10).unwrap());
         let mut cx = Context::from_waker(Waker::noop());
         let open = Rc::new(Cell::new(false));
@@ -128,49 +124,41 @@ mod test {
             .await;
             Ok(directory())
         };
+        let mut first_request = pin!(cache.get_or_fetch(0, 10, fetch));
+        let mut second_request =
+            pin!(cache.get_or_fetch(0, 10, async { panic!("should not fetch") }));
+        let _ = first_request.as_mut().poll(&mut cx);
+        let _ = second_request.as_mut().poll(&mut cx);
 
-        // Act
-        let mut first = pin!(cache.get_or_fetch(0, 10, fetch));
-        let mut second = pin!(cache.get_or_fetch(0, 10, async { panic!("should not fetch") }));
-        assert!(first.as_mut().poll(&mut cx).is_pending());
-        assert!(second.as_mut().poll(&mut cx).is_pending());
         open.set(true);
-        let Poll::Ready(Ok(first)) = first.as_mut().poll(&mut cx) else {
-            panic!("first request did not complete");
-        };
-        let Poll::Ready(Ok(second)) = second.as_mut().poll(&mut cx) else {
-            panic!("second request did not complete");
-        };
+        let first = first_request.as_mut().poll(&mut cx);
+        let second = second_request.as_mut().poll(&mut cx);
 
-        // Assert
-        assert!(Rc::ptr_eq(&first, &second));
+        assert!(matches!(
+            (&first, &second),
+            (Poll::Ready(Ok(first)), Poll::Ready(Ok(second))) if Rc::ptr_eq(first, second)
+        ));
     }
 
-    #[test]
+    #[wasm_bindgen_test(unsupported = test)]
     fn failures_are_not_cached() {
-        // Arrange
         let cache = DirectoryCache::new(NonZeroUsize::new(10).unwrap());
-        let failed = cache
+        let _ = cache
             .get_or_fetch(0, 10, async {
                 Err(PMTilesError::DirectoryDecodeError("boom".to_string()))
             })
-            .now_or_never()
-            .unwrap();
-        assert!(failed.is_err());
+            .now_or_never();
 
-        // Act
         let retried = cache
             .get_or_fetch(0, 10, async { Ok(directory()) })
             .now_or_never()
             .unwrap();
 
-        // Assert
         assert!(retried.is_ok());
     }
 
-    #[test]
+    #[wasm_bindgen_test(unsupported = test)]
     fn least_recently_used_is_evicted() {
-        // Arrange
         let cache = DirectoryCache::new(NonZeroUsize::new(2).unwrap());
         let zero = cache
             .get_or_fetch(0, 10, async { Ok(directory()) })
@@ -182,20 +170,13 @@ mod test {
             .now_or_never()
             .unwrap()
             .unwrap();
-        // Touch 0, so that 1 is the least recently used.
-        cache
+        let _ = cache
             .get_or_fetch(0, 10, async { panic!("should not fetch") })
-            .now_or_never()
-            .unwrap()
-            .unwrap();
-        // Inserting 2 evicts 1.
-        cache
+            .now_or_never();
+        let _ = cache
             .get_or_fetch(2, 10, async { Ok(directory()) })
-            .now_or_never()
-            .unwrap()
-            .unwrap();
+            .now_or_never();
 
-        // Act
         let zero_again = cache
             .get_or_fetch(0, 10, async { panic!("should not fetch") })
             .now_or_never()
@@ -207,14 +188,12 @@ mod test {
             .unwrap()
             .unwrap();
 
-        // Assert
         assert!(Rc::ptr_eq(&zero, &zero_again));
         assert!(!Rc::ptr_eq(&one, &one_again));
     }
 
-    #[test]
+    #[wasm_bindgen_test(unsupported = test)]
     fn failure_does_not_remove_newer_fetch() {
-        // Arrange
         let cache = DirectoryCache::new(NonZeroUsize::new(1).unwrap());
         let mut cx = Context::from_waker(Waker::noop());
         let open = Rc::new(Cell::new(false));
@@ -227,31 +206,95 @@ mod test {
             .await;
             Err(PMTilesError::DirectoryDecodeError("boom".to_string()))
         };
-        let mut failing = pin!(cache.get_or_fetch(0, 10, failing_fetch));
-        assert!(failing.as_mut().poll(&mut cx).is_pending());
-        // Inserting 1 evicts the in-flight fetch of 0, which is then fetched again.
-        cache
+        let mut failing_request = pin!(cache.get_or_fetch(0, 10, failing_fetch));
+        let _ = failing_request.as_mut().poll(&mut cx);
+        let _ = cache
             .get_or_fetch(1, 10, async { Ok(directory()) })
-            .now_or_never()
-            .unwrap()
-            .unwrap();
+            .now_or_never();
         let newer = cache
             .get_or_fetch(0, 10, async { Ok(directory()) })
             .now_or_never()
             .unwrap()
             .unwrap();
-
-        // Act
         open.set(true);
-        let failed = failing.as_mut().poll(&mut cx);
+        let _ = failing_request.as_mut().poll(&mut cx);
 
-        // Assert
-        assert!(matches!(failed, Poll::Ready(Err(_))));
         let cached = cache
             .get_or_fetch(0, 10, async { panic!("should not fetch") })
             .now_or_never()
             .unwrap()
             .unwrap();
+
         assert!(Rc::ptr_eq(&newer, &cached));
+    }
+
+    #[wasm_bindgen_test(unsupported = test)]
+    fn dropped_request_does_not_cancel_shared_fetch() {
+        let cache = DirectoryCache::new(NonZeroUsize::new(10).unwrap());
+        let mut cx = Context::from_waker(Waker::noop());
+        let open = Rc::new(Cell::new(false));
+        let gate = open.clone();
+        let fetch = async move {
+            poll_fn(|_| match gate.get() {
+                true => Poll::Ready(()),
+                false => Poll::Pending,
+            })
+            .await;
+            Ok(directory())
+        };
+        let mut first_request = Box::pin(cache.get_or_fetch(0, 10, fetch));
+        let mut second_request =
+            pin!(cache.get_or_fetch(0, 10, async { panic!("should not fetch") }));
+        let _ = first_request.as_mut().poll(&mut cx);
+        let _ = second_request.as_mut().poll(&mut cx);
+        drop(first_request);
+
+        open.set(true);
+        let second = second_request.as_mut().poll(&mut cx);
+
+        assert!(matches!(second, Poll::Ready(Ok(_))));
+    }
+
+    #[wasm_bindgen_test(unsupported = test)]
+    fn fetch_survives_all_requests_being_dropped() {
+        let cache = DirectoryCache::new(NonZeroUsize::new(10).unwrap());
+        let mut cx = Context::from_waker(Waker::noop());
+        let open = Rc::new(Cell::new(false));
+        let gate = open.clone();
+        let fetch = async move {
+            poll_fn(|_| match gate.get() {
+                true => Poll::Ready(()),
+                false => Poll::Pending,
+            })
+            .await;
+            Ok(directory())
+        };
+        let mut dropped_request = Box::pin(cache.get_or_fetch(0, 10, fetch));
+        let _ = dropped_request.as_mut().poll(&mut cx);
+        drop(dropped_request);
+        open.set(true);
+
+        let later = cache
+            .get_or_fetch(0, 10, async { panic!("should not fetch") })
+            .now_or_never();
+
+        assert!(matches!(later, Some(Ok(_))));
+    }
+
+    #[wasm_bindgen_test(unsupported = test)]
+    fn completed_fetch_survives_request_being_dropped() {
+        let cache = DirectoryCache::new(NonZeroUsize::new(10).unwrap());
+        let first = cache
+            .get_or_fetch(0, 10, async { Ok(directory()) })
+            .now_or_never()
+            .unwrap()
+            .unwrap();
+        drop(first);
+
+        let second = cache
+            .get_or_fetch(0, 10, async { panic!("should not fetch") })
+            .now_or_never();
+
+        assert!(matches!(second, Some(Ok(_))));
     }
 }

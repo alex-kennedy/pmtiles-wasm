@@ -1,0 +1,2 @@
+[alias]
+test-wasm = "bin wasm-pack test --headless --chrome"

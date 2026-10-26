@@ -65,9 +65,10 @@ pub struct TileCoordinate {
 
 #[wasm_bindgen]
 impl TileCoordinate {
-    /// Creates a new PMTiles tile coordinate. Fails if the zoom level is beyond the maximum.
+    /// Creates a new PMTiles tile coordinate. Fails if the zoom level is beyond the maximum, or x or
+    /// y are out of range for the zoom level.
     pub fn new(z: u8, x: u32, y: u32) -> PMTilesResult<Self> {
-        if z > MAX_ZOOM {
+        if z > MAX_ZOOM || x >= 1 << z || y >= 1 << z {
             return Err(PMTilesError::TileOverflowError);
         }
         Ok(Self { z, x, y })
@@ -116,8 +117,10 @@ impl From<TileID> for TileCoordinate {
 mod tests {
     use super::*;
     use rstest::rstest;
+    use wasm_bindgen_test::wasm_bindgen_test;
 
     #[rstest]
+    #[test_attr(wasm_bindgen_test(unsupported = test))]
     #[case((0, 0, 0), TileID(0))]
     #[case((1, 0, 0), TileID(1))]
     #[case((1, 0, 1), TileID(2))]
@@ -130,6 +133,7 @@ mod tests {
     }
 
     #[rstest]
+    #[test_attr(wasm_bindgen_test(unsupported = test))]
     #[case(TileID(0), (0, 0, 0))]
     #[case(TileID(1), (1, 0, 0))]
     #[case(TileID(2), (1, 0, 1))]
@@ -141,7 +145,7 @@ mod tests {
         assert_eq!((c.z(), c.x(), c.y()), zxy);
     }
 
-    #[test]
+    #[wasm_bindgen_test(unsupported = test)]
     fn test_tile_id_round_trip() {
         for z in 0..12 {
             for x in 0..(1 << z) {
@@ -155,7 +159,7 @@ mod tests {
         }
     }
 
-    #[test]
+    #[wasm_bindgen_test(unsupported = test)]
     fn test_tile_extremes() {
         for z in 0..(MAX_ZOOM + 1) {
             let max_dimension = 2_u32.pow(z.into()) - 1;
@@ -182,17 +186,52 @@ mod tests {
         }
     }
 
-    #[test]
+    #[wasm_bindgen_test(unsupported = test)]
+    fn test_tile_extremes_round_trip() {
+        for z in 0..(MAX_ZOOM + 1) {
+            let max_dimension = 2_u32.pow(z.into()) - 1;
+            for (x, y) in [
+                (0, 0),
+                (max_dimension, 0),
+                (0, max_dimension),
+                (max_dimension, max_dimension),
+            ] {
+                let tile_id: TileID = TileCoordinate::new(z, x, y).unwrap().into();
+
+                let got = TileCoordinate::from_tile_id(tile_id);
+
+                assert_eq!((got.z(), got.x(), got.y()), (z, x, y));
+            }
+        }
+    }
+
+    #[wasm_bindgen_test(unsupported = test)]
     fn test_tile_coordinate_overflow() {
         assert!(TileCoordinate::new(MAX_ZOOM + 1, 0, 0).is_err());
     }
 
-    #[test]
+    #[rstest]
+    #[test_attr(wasm_bindgen_test(unsupported = test))]
+    #[case(0, 1, 1)]
+    #[case(0, 1, 0)]
+    #[case(0, 0, 1)]
+    #[case(1, 2, 0)]
+    #[case(MAX_ZOOM, 1 << MAX_ZOOM, 1 << MAX_ZOOM)]
+    fn test_tile_coordinate_out_of_range(#[case] z: u8, #[case] x: u32, #[case] y: u32) {
+        assert!(TileCoordinate::new(z, x, y).is_err());
+    }
+
+    #[wasm_bindgen_test(unsupported = test)]
     fn test_tile_id_overflow() {
         assert!(TileID::new(MAX_TILE_ID + 1).is_err());
     }
 
-    #[test]
+    #[wasm_bindgen_test(unsupported = test)]
+    fn test_tile_id_max_u64_overflow() {
+        assert!(TileID::new(u64::MAX).is_err());
+    }
+
+    #[wasm_bindgen_test(unsupported = test)]
     fn test_max_tile_has_no_overflow() {
         let tile_id = TileID::new(MAX_TILE_ID).unwrap();
         let unchecked_coord = TileCoordinate::from_tile_id(tile_id);

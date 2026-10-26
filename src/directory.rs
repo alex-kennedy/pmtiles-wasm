@@ -7,7 +7,7 @@ use crate::tile_id::TileID;
 
 /// A directory entry describes either where a specific tile can be found in the tile data section
 /// or where a leaf directory can be found in the leaf directories section.
-#[derive(Default, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Default, Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct DirectoryEntry {
     /// Specifies the ID of the tile or the first tile in the leaf directory.
     pub tile_id: TileID,
@@ -146,8 +146,18 @@ impl TryFrom<&[u8]> for Directory {
 #[cfg(test)]
 mod test {
     use super::*;
+    use wasm_bindgen_test::wasm_bindgen_test;
 
-    #[test]
+    fn entry(tile_id: u64, offset: u64, length: u64, run_length: u64) -> DirectoryEntry {
+        DirectoryEntry {
+            tile_id: TileID::new(tile_id).unwrap(),
+            offset,
+            length,
+            run_length,
+        }
+    }
+
+    #[wasm_bindgen_test(unsupported = test)]
     fn test_varint_cursor() {
         let b: Vec<u8> = vec![0, 1, 127, 0xe5, 0x8e, 0x26];
         let mut cursor = Cursor::new(b);
@@ -158,7 +168,7 @@ mod test {
         assert_eq!(cursor.read_varint::<usize>().unwrap(), 624485);
     }
 
-    #[test]
+    #[wasm_bindgen_test(unsupported = test)]
     fn test_large_varint() {
         let b: Vec<u8> = vec![0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x0f];
 
@@ -166,5 +176,153 @@ mod test {
             Cursor::new(b).read_varint::<u64>().unwrap(),
             9007199254740991
         );
+    }
+
+    #[wasm_bindgen_test(unsupported = test)]
+    fn test_decode_directory() {
+        let bytes = [3, 0, 1, 1, 1, 1, 2, 1, 1, 2, 1, 0, 6];
+
+        let directory = Directory::try_from(bytes.as_slice()).unwrap();
+
+        assert_eq!(
+            directory.entries,
+            vec![entry(0, 0, 1, 1), entry(1, 1, 1, 1), entry(2, 5, 2, 2)]
+        );
+    }
+
+    #[wasm_bindgen_test(unsupported = test)]
+    fn test_decode_directory_with_leaf() {
+        let bytes = [2, 0, 100, 1, 0, 10, 20, 1, 0];
+
+        let directory = Directory::try_from(bytes.as_slice()).unwrap();
+
+        assert_eq!(
+            directory.entries,
+            vec![entry(0, 0, 10, 1), entry(100, 10, 20, 0)]
+        );
+    }
+
+    #[wasm_bindgen_test(unsupported = test)]
+    fn test_decode_directory_no_entries() {
+        let bytes = [0];
+
+        let result = Directory::try_from(bytes.as_slice());
+
+        assert!(matches!(result, Err(PMTilesError::DirectoryDecodeError(_))));
+    }
+
+    #[wasm_bindgen_test(unsupported = test)]
+    fn test_decode_directory_zero_length() {
+        let bytes = [1, 0, 1, 0, 1];
+
+        let result = Directory::try_from(bytes.as_slice());
+
+        assert!(matches!(result, Err(PMTilesError::DirectoryDecodeError(_))));
+    }
+
+    #[wasm_bindgen_test(unsupported = test)]
+    fn test_decode_directory_first_offset_contiguous() {
+        let bytes = [1, 0, 1, 1, 0];
+
+        let result = Directory::try_from(bytes.as_slice());
+
+        assert!(matches!(result, Err(PMTilesError::DirectoryDecodeError(_))));
+    }
+
+    #[wasm_bindgen_test(unsupported = test)]
+    fn test_decode_directory_truncated() {
+        let bytes = [2, 0, 1, 1];
+
+        let result = Directory::try_from(bytes.as_slice());
+
+        assert!(matches!(result, Err(PMTilesError::DirectoryDecodeError(_))));
+    }
+
+    #[wasm_bindgen_test(unsupported = test)]
+    fn test_get_entry_missing() {
+        let directory = Directory { entries: vec![] };
+
+        let got = directory.get_entry(TileID::new(101).unwrap());
+
+        assert_eq!(got, None);
+    }
+
+    #[wasm_bindgen_test(unsupported = test)]
+    fn test_get_entry_first_entry_equals_id() {
+        let directory = Directory {
+            entries: vec![entry(100, 1, 1, 1)],
+        };
+
+        let got = directory.get_entry(TileID::new(100).unwrap());
+        let next = directory.get_entry(TileID::new(101).unwrap());
+
+        assert_eq!(got, Some(&entry(100, 1, 1, 1)));
+        assert_eq!(next, None);
+    }
+
+    #[wasm_bindgen_test(unsupported = test)]
+    fn test_get_entry_before_first_entry() {
+        let directory = Directory {
+            entries: vec![entry(100, 1, 1, 1)],
+        };
+
+        let got = directory.get_entry(TileID::new(99).unwrap());
+
+        assert_eq!(got, None);
+    }
+
+    #[wasm_bindgen_test(unsupported = test)]
+    fn test_get_entry_with_run_length() {
+        let directory = Directory {
+            entries: vec![entry(3, 3, 1, 2), entry(5, 5, 1, 2)],
+        };
+
+        let got = directory.get_entry(TileID::new(4).unwrap());
+
+        assert_eq!(got, Some(&entry(3, 3, 1, 2)));
+    }
+
+    #[wasm_bindgen_test(unsupported = test)]
+    fn test_get_entry_single_entry_run_length() {
+        let directory = Directory {
+            entries: vec![entry(100, 1, 1, 2)],
+        };
+
+        let got = directory.get_entry(TileID::new(101).unwrap());
+
+        assert_eq!(got, Some(&entry(100, 1, 1, 2)));
+    }
+
+    #[wasm_bindgen_test(unsupported = test)]
+    fn test_get_entry_last_entry_run_length() {
+        let directory = Directory {
+            entries: vec![entry(100, 1, 1, 1), entry(150, 2, 2, 2)],
+        };
+
+        let got = directory.get_entry(TileID::new(151).unwrap());
+
+        assert_eq!(got, Some(&entry(150, 2, 2, 2)));
+    }
+
+    #[wasm_bindgen_test(unsupported = test)]
+    fn test_get_entry_first_of_many_run_length() {
+        let directory = Directory {
+            entries: vec![entry(50, 1, 1, 2), entry(100, 2, 2, 1), entry(150, 3, 3, 1)],
+        };
+
+        let got = directory.get_entry(TileID::new(51).unwrap());
+
+        assert_eq!(got, Some(&entry(50, 1, 1, 2)));
+    }
+
+    #[wasm_bindgen_test(unsupported = test)]
+    fn test_get_entry_leaf() {
+        let directory = Directory {
+            entries: vec![entry(100, 1, 1, 0)],
+        };
+
+        let got = directory.get_entry(TileID::new(150).unwrap());
+
+        assert_eq!(got, Some(&entry(100, 1, 1, 0)));
     }
 }
