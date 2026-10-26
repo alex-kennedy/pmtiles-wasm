@@ -46,6 +46,9 @@ pub enum PMTilesError {
     /// Unsupported status code from a server fetch, i.e. non-206.
     #[error("unsupported status code, expected 206, got {0}")]
     UnsupportedStatusCode(reqwest::StatusCode),
+    /// Error thrown by a browser API.
+    #[error("JavaScript error: {0}")]
+    JsError(String),
     /// Failed to decode zstd-compressed data.
     #[cfg(feature = "zstd")]
     #[error("zstd decode error: {0}")]
@@ -68,6 +71,12 @@ impl From<std::io::Error> for PMTilesError {
 impl From<ruzstd::decoding::errors::FrameDecoderError> for PMTilesError {
     fn from(value: ruzstd::decoding::errors::FrameDecoderError) -> Self {
         PMTilesError::ZstdDecodeError(Rc::new(value))
+    }
+}
+
+impl From<JsValue> for PMTilesError {
+    fn from(value: JsValue) -> Self {
+        PMTilesError::JsError(format!("{:?}", value))
     }
 }
 

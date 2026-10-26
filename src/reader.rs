@@ -1,8 +1,6 @@
-use bytes::Buf;
 use futures_util::future::{FutureExt, LocalBoxFuture, Shared};
 use reqwest::Url;
 use std::cell::RefCell;
-use std::io::Cursor;
 use std::num::NonZeroUsize;
 use std::rc::Rc;
 use wasm_bindgen::prelude::*;
@@ -55,7 +53,7 @@ impl Archive {
         }
 
         let header = Header::decode(header_bytes[0..127].try_into().unwrap())?;
-        let root = decode_root_directory(&header, &header_bytes)?;
+        let root = decode_root_directory(&header, &header_bytes).await?;
         Ok(Archive {
             header,
             etag,
@@ -153,7 +151,7 @@ impl<S: Source + 'static> Reader<S> {
     async fn fetch_metadata(&self) -> PMTilesResult<String> {
         self.with_reload(async |archive| {
             let bytes = self.metadata_bytes(archive).await?;
-            let decompressed = decompress(Cursor::new(bytes), archive.header.internal_compression)?;
+            let decompressed = decompress(&bytes, archive.header.internal_compression).await?;
             Ok(String::from_utf8(decompressed)?)
         })
         .await
@@ -266,7 +264,7 @@ impl<S: Source + 'static> Reader<S> {
                 archive.etag.as_deref(),
             )
             .await?;
-        decompress(bytes.reader(), archive.header.tile_compression)
+        decompress(&bytes, archive.header.tile_compression).await
     }
 
     async fn metadata_bytes(&self, archive: &Archive) -> PMTilesResult<Vec<u8>> {
@@ -292,7 +290,7 @@ async fn fetch_directory<S: Source>(
     etag: Option<String>,
 ) -> PMTilesResult<Directory> {
     let (bytes, _) = source.fetch(offset, length, etag.as_deref()).await?;
-    let decompressed_bytes = decompress(bytes.reader(), compression)?;
+    let decompressed_bytes = decompress(&bytes, compression).await?;
     Directory::try_from(decompressed_bytes.as_slice())
 }
 
@@ -309,7 +307,7 @@ fn absolute_offset(section_offset: u64, directory_entry: &DirectoryEntry) -> PMT
         })
 }
 
-fn decode_root_directory(header: &Header, bytes: &[u8]) -> PMTilesResult<Directory> {
+async fn decode_root_directory(header: &Header, bytes: &[u8]) -> PMTilesResult<Directory> {
     let start = usize::try_from(header.root_directory_offset).map_err(|e| {
         PMTilesError::InvalidArchiveError(format!("root_directory_offset too large: {}", e))
     })?;
@@ -322,7 +320,7 @@ fn decode_root_directory(header: &Header, bytes: &[u8]) -> PMTilesResult<Directo
         .ok_or_else(|| {
             PMTilesError::InvalidArchiveError("root directory out of bounds".to_string())
         })?;
-    let bytes = decompress(bytes, header.internal_compression)?;
+    let bytes = decompress(bytes, header.internal_compression).await?;
     Directory::try_from(bytes.as_slice())
 }
 
@@ -392,11 +390,11 @@ mod tests {
         bytes
     }
 
-    #[wasm_bindgen_test(unsupported = test)]
-    fn loads_header_and_root_directory() {
+    #[wasm_bindgen_test]
+    async fn loads_header_and_root_directory() {
         let source = MemorySource::new(include_bytes!("../testdata/test_fixture_1.pmtiles"), None);
 
-        let reader = Reader::new(source).now_or_never().unwrap().unwrap();
+        let reader = Reader::new(source).await.unwrap();
 
         let root = reader.archive().root.clone();
         let entry = root.get_entry(TileID::new(0).unwrap()).unwrap();
@@ -406,92 +404,76 @@ mod tests {
         assert_eq!(entry.run_length, 1);
     }
 
-    #[wasm_bindgen_test(unsupported = test)]
-    fn empty_archive_fails_to_load() {
+    #[wasm_bindgen_test(unsupported = futures_test::test)]
+    async fn empty_archive_fails_to_load() {
         let source = MemorySource::new(include_bytes!("../testdata/empty.pmtiles"), None);
 
-        let result = Reader::new(source).now_or_never().unwrap();
+        let result = Reader::new(source).await;
 
         assert!(matches!(result, Err(PMTilesError::HeaderDecodeError(_))));
     }
 
-    #[wasm_bindgen_test(unsupported = test)]
-    fn invalid_magic_number_fails_to_load() {
+    #[wasm_bindgen_test(unsupported = futures_test::test)]
+    async fn invalid_magic_number_fails_to_load() {
         let source = MemorySource::new(include_bytes!("../testdata/invalid.pmtiles"), None);
 
-        let result = Reader::new(source).now_or_never().unwrap();
+        let result = Reader::new(source).await;
 
         assert!(matches!(result, Err(PMTilesError::HeaderDecodeError(_))));
     }
 
-    #[wasm_bindgen_test(unsupported = test)]
-    fn future_spec_version_fails_to_load() {
+    #[wasm_bindgen_test(unsupported = futures_test::test)]
+    async fn future_spec_version_fails_to_load() {
         let source = MemorySource::new(include_bytes!("../testdata/invalid_v4.pmtiles"), None);
 
-        let result = Reader::new(source).now_or_never().unwrap();
+        let result = Reader::new(source).await;
 
         assert!(matches!(result, Err(PMTilesError::HeaderDecodeError(_))));
     }
 
-    #[wasm_bindgen_test(unsupported = test)]
-    fn fetches_metadata() {
+    #[wasm_bindgen_test]
+    async fn fetches_metadata() {
         let source = MemorySource::new(include_bytes!("../testdata/test_fixture_1.pmtiles"), None);
-        let reader = Reader::new(source).now_or_never().unwrap().unwrap();
+        let reader = Reader::new(source).await.unwrap();
 
-        let metadata = reader.fetch_metadata().now_or_never().unwrap().unwrap();
+        let metadata = reader.fetch_metadata().await.unwrap();
 
         assert!(metadata.contains(r#""name": "test_fixture_1.pmtiles""#));
     }
 
-    #[wasm_bindgen_test(unsupported = test)]
-    fn fetches_tile() {
+    #[wasm_bindgen_test]
+    async fn fetches_tile() {
         let source = MemorySource::new(include_bytes!("../testdata/test_fixture_1.pmtiles"), None);
-        let reader = Reader::new(source).now_or_never().unwrap().unwrap();
+        let reader = Reader::new(source).await.unwrap();
 
-        let tile = reader
-            .get_tile_zxy(0, 0, 0)
-            .now_or_never()
-            .unwrap()
-            .unwrap();
+        let tile = reader.get_tile_zxy(0, 0, 0).await.unwrap();
 
         assert!(tile.unwrap().starts_with(&[0x1a, 0x2f, 0x78, 0x02]));
     }
 
-    #[wasm_bindgen_test(unsupported = test)]
-    fn tile_outside_zoom_range_is_none() {
+    #[wasm_bindgen_test]
+    async fn tile_outside_zoom_range_is_none() {
         let source = MemorySource::new(include_bytes!("../testdata/test_fixture_1.pmtiles"), None);
-        let reader = Reader::new(source.clone()).now_or_never().unwrap().unwrap();
+        let reader = Reader::new(source.clone()).await.unwrap();
 
-        let tile = reader
-            .get_tile_zxy(1, 0, 0)
-            .now_or_never()
-            .unwrap()
-            .unwrap();
+        let tile = reader.get_tile_zxy(1, 0, 0).await.unwrap();
 
         assert_eq!(tile, None);
         assert_eq!(source.requests.get(), 1);
     }
 
-    #[wasm_bindgen_test(unsupported = test)]
-    fn etag_change_reloads_archive() {
+    #[wasm_bindgen_test]
+    async fn etag_change_reloads_archive() {
         let source = MemorySource::new(
             include_bytes!("../testdata/test_fixture_1.pmtiles"),
             Some("etag_1"),
         );
-        let reader = Reader::new(source.clone()).now_or_never().unwrap().unwrap();
-        reader
-            .get_tile_zxy(0, 0, 0)
-            .now_or_never()
-            .unwrap()
-            .unwrap();
+        let reader = Reader::new(source.clone()).await.unwrap();
+        reader.get_tile_zxy(0, 0, 0).await.unwrap();
         let requests_before_change = source.requests.get();
         *source.etag.borrow_mut() = Some("etag_2".to_string());
 
-        let tile = reader
-            .get_tile_zxy(0, 0, 0)
-            .now_or_never()
-            .unwrap()
-            .unwrap();
+        let tile = reader.get_tile_zxy(0, 0, 0).await.unwrap();
 
         assert!(tile.is_some());
         assert_eq!(requests_before_change, 2);
@@ -499,31 +481,23 @@ mod tests {
         assert_eq!(reader.archive().etag.as_deref(), Some("etag_2"));
     }
 
-    #[wasm_bindgen_test(unsupported = test)]
-    fn unchanged_etag_does_not_reload_archive() {
+    #[wasm_bindgen_test]
+    async fn unchanged_etag_does_not_reload_archive() {
         let source = MemorySource::new(
             include_bytes!("../testdata/test_fixture_1.pmtiles"),
             Some("etag_1"),
         );
-        let reader = Reader::new(source.clone()).now_or_never().unwrap().unwrap();
-        reader
-            .get_tile_zxy(0, 0, 0)
-            .now_or_never()
-            .unwrap()
-            .unwrap();
+        let reader = Reader::new(source.clone()).await.unwrap();
+        reader.get_tile_zxy(0, 0, 0).await.unwrap();
 
-        let tile = reader
-            .get_tile_zxy(0, 0, 0)
-            .now_or_never()
-            .unwrap()
-            .unwrap();
+        let tile = reader.get_tile_zxy(0, 0, 0).await.unwrap();
 
         assert!(tile.is_some());
         assert_eq!(source.requests.get(), 3);
     }
 
-    #[wasm_bindgen_test(unsupported = test)]
-    fn fetches_tiles_through_leaf_directories() {
+    #[wasm_bindgen_test(unsupported = futures_test::test)]
+    async fn fetches_tiles_through_leaf_directories() {
         let entries: Vec<DirectoryEntry> = (0..100_000)
             .step_by(2)
             .map(|i| DirectoryEntry {
@@ -574,20 +548,17 @@ mod tests {
         archive.extend_from_slice(&leaves);
         archive.extend_from_slice(&tile_data);
         let source = MemorySource::new(&archive, None);
-        let reader = Reader::new(source).now_or_never().unwrap().unwrap();
+        let reader = Reader::new(source).await.unwrap();
 
-        let tiles: Vec<(u64, Option<Vec<u8>>)> = (0..100_000)
-            .step_by(31)
-            .map(|i| {
-                let coordinate = TileCoordinate::from_tile_id(TileID::new(i).unwrap());
-                let tile = reader
-                    .get_tile_zxy(coordinate.z(), coordinate.x(), coordinate.y())
-                    .now_or_never()
-                    .unwrap()
-                    .unwrap();
-                (i, tile)
-            })
-            .collect();
+        let mut tiles = Vec::new();
+        for i in (0..100_000).step_by(31) {
+            let coordinate = TileCoordinate::from_tile_id(TileID::new(i).unwrap());
+            let tile = reader
+                .get_tile_zxy(coordinate.z(), coordinate.x(), coordinate.y())
+                .await
+                .unwrap();
+            tiles.push((i, tile));
+        }
 
         assert!(root.len() as u64 <= HEADER_AND_ROOT_MAX_SIZE - root_offset);
         for (i, tile) in tiles {
