@@ -43,9 +43,18 @@ pub enum PMTilesError {
     /// URL parse error.
     #[error("url parse error: {0}")]
     UrlParseError(#[from] url::ParseError),
-    /// Unsupported status code from a server fetch, i.e. non-206.
-    #[error("unsupported status code, expected 206, got {0}")]
+    /// Unsupported status code from a server fetch, i.e. not 200 or 206.
+    #[error("unsupported status code, expected 200 or 206, got {0}")]
     UnsupportedStatusCode(reqwest::StatusCode),
+    /// The server answered a range request with the whole file, or without saying how long the
+    /// response is.
+    #[error(
+        "server returned 200 without a Content-Length within the requested range, check that it supports HTTP range requests"
+    )]
+    ByteServingUnsupported,
+    /// A custom request header has an invalid name or value, or cannot be overridden.
+    #[error("invalid header: {0}")]
+    InvalidHeaderError(String),
     /// Error thrown by a browser API.
     #[error("JavaScript error: {0}")]
     JsError(String),

@@ -10,7 +10,7 @@ use crate::cache::DirectoryCache;
 use crate::compression::{Compression, decompress};
 use crate::directory::{Directory, DirectoryEntry};
 use crate::error::{PMTilesError, PMTilesResult};
-use crate::fetch_source::FetchSource;
+use crate::fetch_source::{FetchOptions, FetchSource};
 use crate::header::Header;
 use crate::source::Source;
 use crate::tile_id::TileID;
@@ -78,10 +78,21 @@ pub struct PMTilesReader {
 #[wasm_bindgen]
 impl PMTilesReader {
     pub async fn new(url: &str) -> PMTilesResult<Self> {
-        let source = Rc::new(FetchSource::new(Url::parse(url)?));
+        Self::with_options(url, FetchOptions::default()).await
+    }
+
+    /// Opens the archive, sending every request with the given headers and credentials.
+    pub async fn with_options(url: &str, options: FetchOptions) -> PMTilesResult<Self> {
+        let source = Rc::new(FetchSource::new(Url::parse(url)?, options));
         Ok(Self {
             reader: Reader::new(source).await?,
         })
+    }
+
+    /// Replaces the headers and credentials used for all subsequent requests, e.g. to refresh an
+    /// auth token.
+    pub fn set_fetch_options(&self, options: FetchOptions) {
+        self.reader.source.set_options(options);
     }
 
     #[wasm_bindgen(getter)]
