@@ -43,7 +43,7 @@ impl Directory {
             return None;
         }
         let entry = &self.entries[i - 1];
-        if entry.is_leaf_directory() || tile_id.id() < entry.tile_id.id() + entry.run_length {
+        if entry.is_leaf_directory() || tile_id.id() - entry.tile_id.id() < entry.run_length {
             return Some(entry);
         }
         None
@@ -77,6 +77,13 @@ impl TryFrom<&[u8]> for Directory {
             return Err(PMTilesError::DirectoryDecodeError(
                 "number of directory entries == 0, must be > 0".to_string(),
             ));
+        }
+        if n_entries > bytes.len() / 4 {
+            return Err(PMTilesError::DirectoryDecodeError(format!(
+                "{} directory entries cannot fit in {} bytes",
+                n_entries,
+                bytes.len()
+            )));
         }
 
         let mut entries = vec![DirectoryEntry::default(); n_entries as usize];
@@ -131,7 +138,15 @@ impl TryFrom<&[u8]> for Directory {
             if offset_encoded > 0 {
                 entries[i].offset = offset_encoded - 1;
             } else if i >= 1 {
-                entries[i].offset = entries[i - 1].offset + entries[i - 1].length
+                entries[i].offset = entries[i - 1]
+                    .offset
+                    .checked_add(entries[i - 1].length)
+                    .ok_or_else(|| {
+                        PMTilesError::DirectoryDecodeError(format!(
+                            "directory entry {} offset overflows",
+                            i
+                        ))
+                    })?;
             } else {
                 return Err(PMTilesError::DirectoryDecodeError(
                     "first directory entry offset == 0, must be > 0".to_string(),
@@ -236,6 +251,38 @@ mod test {
         let result = Directory::try_from(bytes.as_slice());
 
         assert!(matches!(result, Err(PMTilesError::DirectoryDecodeError(_))));
+    }
+
+    #[wasm_bindgen_test(unsupported = test)]
+    fn test_decode_directory_too_many_entries() {
+        let bytes = [0xff, 0xff, 0xff, 0xff, 0x0f, 0, 1, 1, 1];
+
+        let result = Directory::try_from(bytes.as_slice());
+
+        assert!(matches!(result, Err(PMTilesError::DirectoryDecodeError(_))));
+    }
+
+    #[wasm_bindgen_test(unsupported = test)]
+    fn test_decode_directory_contiguous_offset_overflow() {
+        let mut bytes = vec![2, 0, 1, 1, 1];
+        bytes.extend_from_slice(&[0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x01]);
+        bytes.extend_from_slice(&[0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x01]);
+        bytes.extend_from_slice(&[2, 0]);
+
+        let result = Directory::try_from(bytes.as_slice());
+
+        assert!(matches!(result, Err(PMTilesError::DirectoryDecodeError(_))));
+    }
+
+    #[wasm_bindgen_test(unsupported = test)]
+    fn test_get_entry_huge_run_length() {
+        let directory = Directory {
+            entries: vec![entry(100, 1, 1, u64::MAX)],
+        };
+
+        let got = directory.get_entry(TileID::new(150).unwrap());
+
+        assert_eq!(got, Some(&entry(100, 1, 1, u64::MAX)));
     }
 
     #[wasm_bindgen_test(unsupported = test)]
