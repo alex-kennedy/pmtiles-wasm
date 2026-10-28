@@ -1,5 +1,8 @@
 # PMTiles WebAssembly
 
+[![Tests](https://github.com/alex-kennedy/pmtiles-wasm/actions/workflows/test.yml/badge.svg?branch=main)](https://github.com/alex-kennedy/pmtiles-wasm/actions/workflows/test.yml)
+[![Crates.io](https://img.shields.io/crates/v/pmtiles-wasm.svg)](https://crates.io/crates/pmtiles-wasm)
+
 A Rust client library that compiles to WebAssembly for reading 
 [PMTiles](https://pmtiles.io) v3 archives over HTTP range requests.
 
