@@ -10,6 +10,8 @@ mod tile_id;
 
 pub use compression::*;
 pub use error::*;
+pub use fetch_source::{Credentials, FetchOptions};
+pub use header::{Clustered, Header, LatLng, TileType};
 pub use reader::PMTilesReader;
 pub use source::*;
 pub use tile_id::*;

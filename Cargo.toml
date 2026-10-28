@@ -10,6 +10,7 @@ readme = "README.md"
 keywords = ["pmtiles", "tiles", "maps", "wasm", "geospatial"]
 categories = ["wasm", "science::geo"]
 rust-version = "1.85"
+exclude = ["testdata/spec/", "tests/"]
 
 [lib]
 crate-type = ["cdylib", "rlib"]
@@ -46,6 +47,7 @@ wasm-bindgen-test = "0.3.34"
 rstest = "0.28.0"
 approx = "0.5.1"
 futures-test = "0.3.34"
+web-sys = { version = "0.3.82", features = ["Blob", "Url"] }
 
 [profile.release]
 # Tell `rustc` to optimize for small code size.
