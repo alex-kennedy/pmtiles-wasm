@@ -1,11 +1,15 @@
 [package]
 name = "pmtiles-wasm"
 version = "0.1.0"
-authors = ["Alex Kennedy <apkennedy@me.com>"]
+authors = ["Alex Kennedy <alex@alexkennedy.dev>"]
 edition = "2024"
 license = "MIT"
 description = "PMTiles client in rust web assembly"
 repository = "https://github.com/alex-kennedy/pmtiles-wasm"
+readme = "README.md"
+keywords = ["pmtiles", "tiles", "maps", "wasm", "geospatial"]
+categories = ["wasm", "science::geo"]
+rust-version = "1.85"
 
 [lib]
 crate-type = ["cdylib", "rlib"]
@@ -31,7 +35,11 @@ thiserror = "2.0.21"
 url = "2.5.8"
 wasm-bindgen = "0.2.84"
 wasm-bindgen-futures = "0.4.55"
-web-sys = { version = "0.3.82", features = ["ReadableStream", "ReadableWritablePair", "Response"] }
+web-sys = { version = "0.3.82", features = [
+  "ReadableStream",
+  "ReadableWritablePair",
+  "Response",
+] }
 
 [dev-dependencies]
 wasm-bindgen-test = "0.3.34"
