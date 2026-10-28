@@ -104,6 +104,7 @@ fn read_all<R: std::io::Read>(mut r: R) -> PMTilesResult<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rstest::rstest;
     use wasm_bindgen_test::wasm_bindgen_test;
 
     #[cfg(feature = "gzip")]
@@ -126,5 +127,113 @@ mod tests {
         let result = decompress(bytes, Compression::Gzip).await;
 
         assert!(matches!(result, Err(PMTilesError::JsError(_))));
+    }
+
+    #[rstest]
+    #[test_attr(wasm_bindgen_test(unsupported = test))]
+    #[case(0, Compression::Unknown)]
+    #[case(1, Compression::None)]
+    #[case(2, Compression::Gzip)]
+    #[case(3, Compression::Brotli)]
+    #[case(4, Compression::Zstd)]
+    fn compression_from_byte(#[case] value: u8, #[case] want: Compression) {
+        let got = Compression::try_from(value).unwrap();
+
+        assert_eq!(got, want);
+    }
+
+    #[wasm_bindgen_test(unsupported = test)]
+    fn compression_from_invalid_byte_fails() {
+        let result = Compression::try_from(5);
+
+        assert!(matches!(result, Err(PMTilesError::HeaderDecodeError(_))));
+    }
+
+    #[rstest]
+    #[test_attr(wasm_bindgen_test(unsupported = futures_test::test))]
+    #[case(Compression::Unknown)]
+    #[case(Compression::None)]
+    async fn uncompressed_data_is_returned_as_is(#[case] compression: Compression) {
+        let bytes = b"tile data";
+
+        let got = decompress(bytes, compression).await.unwrap();
+
+        assert_eq!(got, bytes);
+    }
+
+    #[cfg(not(feature = "gzip"))]
+    #[wasm_bindgen_test(unsupported = futures_test::test)]
+    async fn gzip_is_unsupported_without_feature() {
+        let result = decompress(b"data", Compression::Gzip).await;
+
+        assert!(matches!(
+            result,
+            Err(PMTilesError::UnsupportedCompression(Compression::Gzip))
+        ));
+    }
+
+    #[cfg(not(feature = "brotli"))]
+    #[wasm_bindgen_test(unsupported = futures_test::test)]
+    async fn brotli_is_unsupported_without_feature() {
+        let result = decompress(b"data", Compression::Brotli).await;
+
+        assert!(matches!(
+            result,
+            Err(PMTilesError::UnsupportedCompression(Compression::Brotli))
+        ));
+    }
+
+    #[cfg(not(feature = "zstd"))]
+    #[wasm_bindgen_test(unsupported = futures_test::test)]
+    async fn zstd_is_unsupported_without_feature() {
+        let result = decompress(b"data", Compression::Zstd).await;
+
+        assert!(matches!(
+            result,
+            Err(PMTilesError::UnsupportedCompression(Compression::Zstd))
+        ));
+    }
+
+    #[cfg(feature = "brotli")]
+    #[wasm_bindgen_test(unsupported = futures_test::test)]
+    async fn brotli_round_trips() {
+        use std::io::Write;
+        let mut compressed = Vec::new();
+        brotli::CompressorWriter::new(&mut compressed, 4096, 5, 22)
+            .write_all(b"tile data")
+            .unwrap();
+
+        let got = decompress(&compressed, Compression::Brotli).await.unwrap();
+
+        assert_eq!(got, b"tile data");
+    }
+
+    #[cfg(feature = "brotli")]
+    #[wasm_bindgen_test(unsupported = futures_test::test)]
+    async fn brotli_rejects_invalid_data() {
+        let result = decompress(b"not brotli", Compression::Brotli).await;
+
+        assert!(matches!(result, Err(PMTilesError::IOError(_))));
+    }
+
+    #[cfg(feature = "zstd")]
+    #[wasm_bindgen_test(unsupported = futures_test::test)]
+    async fn zstd_round_trips() {
+        let compressed = ruzstd::encoding::compress_to_vec(
+            b"tile data".as_slice(),
+            ruzstd::encoding::CompressionLevel::Fastest,
+        );
+
+        let got = decompress(&compressed, Compression::Zstd).await.unwrap();
+
+        assert_eq!(got, b"tile data");
+    }
+
+    #[cfg(feature = "zstd")]
+    #[wasm_bindgen_test(unsupported = futures_test::test)]
+    async fn zstd_rejects_invalid_data() {
+        let result = decompress(b"not zstd", Compression::Zstd).await;
+
+        assert!(matches!(result, Err(PMTilesError::ZstdDecodeError(_))));
     }
 }

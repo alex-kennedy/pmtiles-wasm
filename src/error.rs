@@ -94,3 +94,27 @@ impl From<PMTilesError> for JsValue {
         JsError::new(&value.to_string()).into()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use wasm_bindgen_test::wasm_bindgen_test;
+
+    #[wasm_bindgen_test]
+    fn js_value_converts_to_js_error() {
+        let error = PMTilesError::from(JsValue::from_str("boom"));
+
+        assert!(matches!(&error, PMTilesError::JsError(message) if message.contains("boom")));
+    }
+
+    #[wasm_bindgen_test]
+    fn error_converts_to_js_error_with_message() {
+        let error = PMTilesError::ByteServingUnsupported;
+        let message = error.to_string();
+
+        let value = JsValue::from(error);
+
+        let js_error = value.dyn_into::<js_sys::Error>().unwrap();
+        assert_eq!(String::from(js_error.message()), message);
+    }
+}

@@ -244,4 +244,11 @@ mod tests {
             .is_ok()
         );
     }
+
+    #[wasm_bindgen_test(unsupported = test)]
+    fn tile_coordinate_from_tile_id_conversion() {
+        let coordinate: TileCoordinate = TileID(5).into();
+
+        assert_eq!((coordinate.z(), coordinate.x(), coordinate.y()), (2, 0, 0));
+    }
 }

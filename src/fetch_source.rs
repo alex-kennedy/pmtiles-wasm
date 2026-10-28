@@ -397,4 +397,58 @@ mod tests {
             Err(PMTilesError::InvalidHeaderError(_))
         ));
     }
+
+    fn source(options: FetchOptions) -> FetchSource {
+        FetchSource::new(
+            Url::parse("https://example.com/tiles.pmtiles").unwrap(),
+            options,
+        )
+    }
+
+    #[wasm_bindgen_test(unsupported = test)]
+    fn request_sets_inclusive_range() {
+        let source = source(FetchOptions::new());
+
+        let request = source.request(10, 5, false).unwrap().build().unwrap();
+
+        assert_eq!(request.headers().get(header::RANGE).unwrap(), "bytes=10-14");
+    }
+
+    #[wasm_bindgen_test(unsupported = test)]
+    fn request_sends_custom_headers() {
+        let mut options = FetchOptions::new();
+        options.set_header("Authorization", "Bearer token").unwrap();
+        let source = source(options);
+
+        let request = source.request(0, 1, false).unwrap().build().unwrap();
+
+        assert_eq!(
+            request.headers().get(header::AUTHORIZATION).unwrap(),
+            "Bearer token"
+        );
+    }
+
+    #[wasm_bindgen_test(unsupported = test)]
+    fn set_options_replaces_custom_headers() {
+        let mut old = FetchOptions::new();
+        old.set_header("Authorization", "Bearer old").unwrap();
+        let source = source(old);
+        let mut new = FetchOptions::new();
+        new.set_header("X-Custom", "value").unwrap();
+
+        source.set_options(new);
+
+        let request = source.request(0, 1, false).unwrap().build().unwrap();
+        assert!(request.headers().get(header::AUTHORIZATION).is_none());
+        assert_eq!(request.headers().get("X-Custom").unwrap(), "value");
+    }
+
+    #[wasm_bindgen_test(unsupported = test)]
+    fn request_range_overflow_is_rejected() {
+        let source = source(FetchOptions::new());
+
+        let result = source.request(u64::MAX, 2, false);
+
+        assert!(matches!(result, Err(PMTilesError::InvalidArchiveError(_))));
+    }
 }

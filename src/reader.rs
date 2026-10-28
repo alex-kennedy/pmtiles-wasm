@@ -576,4 +576,14 @@ mod tests {
             assert_eq!(tile, Some(vec![((i - i % 2) % 251) as u8]), "tile {}", i);
         }
     }
+
+    #[wasm_bindgen_test]
+    async fn fetches_raw_metadata() {
+        let source = MemorySource::new(include_bytes!("../testdata/test_fixture_1.pmtiles"), None);
+        let reader = Reader::new(source).await.unwrap();
+
+        let raw = reader.fetch_metadata_raw().await.unwrap();
+
+        assert!(raw.starts_with(&[0x1f, 0x8b]));
+    }
 }
