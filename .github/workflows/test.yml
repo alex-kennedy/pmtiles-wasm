@@ -1,0 +1,39 @@
+name: Test
+
+on:
+  push:
+  pull_request:
+
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    name: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-directories: .bin
+
+      - name: Install cargo-run-bin
+        run: command -v cargo-bin || cargo install cargo-run-bin --locked
+
+      - name: Native tests
+        run: cargo test
+
+      - name: Native tests with all features
+        run: cargo test --all-features
+
+      - name: Wasm tests (headless Chrome)
+        run: cargo test-wasm
