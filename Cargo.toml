@@ -53,5 +53,8 @@ web-sys = { version = "0.3.82", features = ["Blob", "Url"] }
 # Tell `rustc` to optimize for small code size.
 opt-level = "s"
 
+[package.metadata.docs.rs]
+targets = ["wasm32-unknown-unknown"]
+
 [package.metadata.bin]
 wasm-pack = { version = "0.15.0", locked = true }
