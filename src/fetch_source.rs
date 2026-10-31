@@ -63,6 +63,7 @@ pub struct FetchSource {
     /// Set once the archive has been seen to change. From then on, requests bypass the browser's
     /// HTTP cache, which may still hold ranges of the old archive.
     must_reload: Cell<bool>,
+    no_store: bool,
 }
 
 impl Source for FetchSource {
@@ -112,6 +113,7 @@ impl FetchSource {
             url: url,
             options: RefCell::new(options),
             must_reload: Cell::new(false),
+            no_store: is_chromium(&user_agent()),
         }
     }
 
@@ -133,15 +135,47 @@ impl FetchSource {
             .get(self.url.clone())
             .headers(options.headers.clone())
             .header(header::RANGE, format!("bytes={}-{}", offset, end));
-        Ok(with_browser_options(request, options.credentials, reload))
+        let cache = match (reload, self.no_store) {
+            (true, _) => CacheMode::Reload,
+            (false, true) => CacheMode::NoStore,
+            (false, false) => CacheMode::Default,
+        };
+        Ok(with_browser_options(request, options.credentials, cache))
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CacheMode {
+    Default,
+    NoStore,
+    Reload,
+}
+
+#[cfg(target_arch = "wasm32")]
+fn user_agent() -> String {
+    js_sys::Reflect::get(&js_sys::global(), &"navigator".into())
+        .and_then(|navigator| js_sys::Reflect::get(&navigator, &"userAgent".into()))
+        .ok()
+        .and_then(|user_agent| user_agent.as_string())
+        .unwrap_or_default()
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn user_agent() -> String {
+    String::new()
+}
+
+fn is_chromium(user_agent: &str) -> bool {
+    ["Chrome", "Chromium", "Edg", "OPR", "Brave"]
+        .iter()
+        .any(|name| user_agent.contains(name))
 }
 
 #[cfg(target_arch = "wasm32")]
 fn with_browser_options(
     request: RequestBuilder,
     credentials: Option<Credentials>,
-    reload: bool,
+    cache: CacheMode,
 ) -> RequestBuilder {
     let request = match credentials {
         Some(Credentials::Omit) => request.fetch_credentials_omit(),
@@ -149,9 +183,10 @@ fn with_browser_options(
         Some(Credentials::Include) => request.fetch_credentials_include(),
         None => request,
     };
-    match reload {
-        true => request.fetch_cache_reload(),
-        false => request,
+    match cache {
+        CacheMode::Default => request,
+        CacheMode::NoStore => request.fetch_cache_no_store(),
+        CacheMode::Reload => request.fetch_cache_reload(),
     }
 }
 
@@ -159,7 +194,7 @@ fn with_browser_options(
 fn with_browser_options(
     request: RequestBuilder,
     _credentials: Option<Credentials>,
-    _reload: bool,
+    _cache: CacheMode,
 ) -> RequestBuilder {
     request
 }
@@ -344,6 +379,27 @@ mod tests {
             result,
             Err(PMTilesError::UnsupportedStatusCode(StatusCode::NO_CONTENT))
         ));
+    }
+
+    #[wasm_bindgen_test(unsupported = test)]
+    fn chrome_on_windows_is_chromium() {
+        let user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+
+        assert!(is_chromium(user_agent));
+    }
+
+    #[wasm_bindgen_test(unsupported = test)]
+    fn chrome_on_mac_is_chromium() {
+        let user_agent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+
+        assert!(is_chromium(user_agent));
+    }
+
+    #[wasm_bindgen_test(unsupported = test)]
+    fn firefox_is_not_chromium() {
+        let user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0";
+
+        assert!(!is_chromium(user_agent));
     }
 
     #[wasm_bindgen_test(unsupported = test)]
